@@ -1,0 +1,28 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OBS Python plugin cache (if any)
+.obs-temp/
+obs_data/
+
+# VSCode / IDE / editor config
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Local config or cache
+killrate_config.json
+*.log
+
+# OS-specific junk
+Thumbs.db
+.DS_Store
+
+# Virtual environments
+venv/
+env/
+ENV/
