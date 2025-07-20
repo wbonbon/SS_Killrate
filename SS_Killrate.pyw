@@ -3,53 +3,53 @@ from tkinter import Menu, Toplevel, Scale
 import json, os, asyncio, websockets, threading, re
 
 CONFIG_PATH = "killrate_config.json"
-WIDTH, HEIGHT = 280, 60
+WIDTH, HEIGHT = 350, 60
 
-# ==== 設定ロードと保存 ====
+# 設定読み書き
 def load_config():
-    default = {"x": 100, "y": 100, "alpha": 0.85}
+    default = {"x": 100, "y": 100, "alpha": 0.92, "bg": "#222233"}
     if os.path.exists(CONFIG_PATH):
         try:
             conf = json.load(open(CONFIG_PATH, encoding="utf-8"))
-            for key in default:
-                if key not in conf:
-                    conf[key] = default[key]
+            for k in default:
+                conf.setdefault(k, default[k])
             return conf
         except:
             pass
     return default
 
-def save_config(x, y, alpha):
+def save_config(x, y, alpha, bg):
     try:
-        json.dump({"x": x, "y": y, "alpha": alpha},
+        json.dump({"x": x, "y": y, "alpha": alpha, "bg": bg},
                   open(CONFIG_PATH, "w", encoding="utf-8"))
     except:
         pass
 
-# ==== HUD生成 ====
 conf = load_config()
 root = tk.Tk()
 root.geometry(f"{WIDTH}x{HEIGHT}+{conf['x']}+{conf['y']}")
 root.title("Killrate HUD")
-root.configure(bg="black")
+root.configure(bg=conf["bg"])
 root.attributes("-topmost", True)
 root.attributes("-alpha", conf["alpha"])
 root.overrideredirect(True)
 
-label = tk.Label(root, text="待機中…", font=("Meiryo", 16), fg="white", bg="black")
+label = tk.Label(root, text="待機中…", font=("Meiryo", 18, "bold"),
+                 fg="white", bg=conf["bg"])
 label.pack(fill="both", expand=True)
 
-# ==== メニュー・操作 ====
+# メニューとドラッグ
 menu = Menu(root, tearoff=0)
 menu.add_command(label="終了", command=root.quit)
-label.bind("<Button-3>", lambda e: menu.post(e.x_root, e.y_root))   # 右クリック → メニュー
+label.bind("<Button-3>", lambda e: menu.post(e.x_root, e.y_root))
 label.bind("<ButtonPress-1>", lambda e: setattr(root, "_drag", (e.x, e.y)))
 label.bind("<B1-Motion>", lambda e: (
     root.geometry(f"+{root.winfo_x()+e.x-root._drag[0]}+{root.winfo_y()+e.y-root._drag[1]}"),
-    save_config(root.winfo_x()+e.x-root._drag[0], root.winfo_y()+e.y-root._drag[1], root.attributes("-alpha"))
+    save_config(root.winfo_x()+e.x-root._drag[0], root.winfo_y()+e.y-root._drag[1],
+                root.attributes("-alpha"), conf["bg"])
 ))
 
-# ==== 透過率設定（中クリック） ====
+# 透過率設定UI（中クリック）
 def show_alpha_settings(e=None):
     win = Toplevel(root)
     win.title("透過率設定")
@@ -61,19 +61,19 @@ def show_alpha_settings(e=None):
     s.pack()
     s.configure(command=lambda val: (
         root.attributes("-alpha", float(val)),
-        save_config(root.winfo_x(), root.winfo_y(), float(val))
+        save_config(root.winfo_x(), root.winfo_y(), float(val), conf["bg"])
     ))
 label.bind("<Button-2>", show_alpha_settings)
 
-# ==== 時間の柔軟なパース（"01h 01m", "36m 24s", etc） ====
+# 時間パース：h/m/s対応
 def parse_time_to_minutes(t):
     h = m = s = 0
     if match := re.search(r"(\d+)h", t): h = int(match.group(1))
     if match := re.search(r"(\d+)m", t): m = int(match.group(1))
     if match := re.search(r"(\d+)s", t): s = int(match.group(1))
-    return h*60 + m + s/60
+    return h * 60 + m + s / 60
 
-# ==== キルレート計算ロジック ====
+# キルレート計算
 def calculate_efficiency(payload):
     try:
         data = json.loads(payload)
@@ -86,7 +86,7 @@ def calculate_efficiency(payload):
         print("計算エラー:", e)
         return "未計測"
 
-# ==== WebSocket受信処理 ====
+# WebSocket受信
 async def handle_connection(websocket):
     async for message in websocket:
         result = calculate_efficiency(message)
@@ -105,6 +105,5 @@ def start_ws_thread():
         loop.run_forever()
     threading.Thread(target=run, daemon=True).start()
 
-# ==== 起動 ====
 start_ws_thread()
 root.mainloop()

@@ -1,0 +1,4 @@
+tessedit_char_whitelist 0123456789hms
+preserve_interword_spaces 1
+load_system_dawg 0
+load_freq_dawg 0
