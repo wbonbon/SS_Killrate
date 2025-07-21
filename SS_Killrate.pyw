@@ -1,109 +1,92 @@
-import tkinter as tk
+import tkinter as tk, json, os, asyncio, websockets, threading, re, time
+import pygetwindow as gw, pystray
+from PIL import Image, ImageDraw
 from tkinter import Menu, Toplevel, Scale
-import json, os, asyncio, websockets, threading, re
 
-CONFIG_PATH = "killrate_config.json"
-WIDTH, HEIGHT = 350, 60
+conf = json.load(open("killrate_config.json", encoding="utf-8")) if os.path.exists("killrate_config.json") else {
+    "x":100, "y":100, "alpha":0.92, "bg":"#222233", "parent":"MuMuPlayer", "dx":10, "dy":10, "follow":False}
+def save(): json.dump(conf, open("killrate_config.json", "w", encoding="utf-8"))
 
-# 設定読み書き
-def load_config():
-    default = {"x": 100, "y": 100, "alpha": 0.92, "bg": "#222233"}
-    if os.path.exists(CONFIG_PATH):
+root = tk.Tk(); W,H=350,80
+root.geometry(f"{W}x{H}+{conf['x']}+{conf['y']}"); root.configure(bg=conf["bg"])
+root.attributes("-topmost",1); root.attributes("-alpha",conf["alpha"]); root.overrideredirect(True)
+
+border = tk.Frame(root,bg="#888888"); label = tk.Label(root,text="待機中…",font=("Meiryo",18,"bold"),fg="white",bg=conf["bg"])
+border.place(x=0,y=0,width=W,height=H) if not conf["follow"] else None
+label.place(relx=0.5,rely=0.5,anchor="center")
+
+def update_border(): border.place(x=0,y=0,width=W,height=H) if not conf["follow"] else border.place_forget()
+def set_follow(f):
+    conf["follow"]=f
+    if f:
         try:
-            conf = json.load(open(CONFIG_PATH, encoding="utf-8"))
-            for k in default:
-                conf.setdefault(k, default[k])
-            return conf
-        except:
-            pass
-    return default
+            w=gw.getWindowsWithTitle(conf["parent"])[0]
+            conf["dx"]=w.width-root.winfo_x()+w.left-W
+            conf["dy"]=w.height-root.winfo_y()+w.top-H
+        except: conf["follow"]=False
+    save(); update_border(); update_menu()
+def move_zero(): root.geometry("+0+0"); conf["follow"]=False; save(); update_border(); update_menu()
 
-def save_config(x, y, alpha, bg):
-    try:
-        json.dump({"x": x, "y": y, "alpha": alpha, "bg": bg},
-                  open(CONFIG_PATH, "w", encoding="utf-8"))
-    except:
-        pass
-
-conf = load_config()
-root = tk.Tk()
-root.geometry(f"{WIDTH}x{HEIGHT}+{conf['x']}+{conf['y']}")
-root.title("Killrate HUD")
-root.configure(bg=conf["bg"])
-root.attributes("-topmost", True)
-root.attributes("-alpha", conf["alpha"])
-root.overrideredirect(True)
-
-label = tk.Label(root, text="待機中…", font=("Meiryo", 18, "bold"),
-                 fg="white", bg=conf["bg"])
-label.pack(fill="both", expand=True)
-
-# メニューとドラッグ
 menu = Menu(root, tearoff=0)
-menu.add_command(label="終了", command=root.quit)
-label.bind("<Button-3>", lambda e: menu.post(e.x_root, e.y_root))
-label.bind("<ButtonPress-1>", lambda e: setattr(root, "_drag", (e.x, e.y)))
-label.bind("<B1-Motion>", lambda e: (
-    root.geometry(f"+{root.winfo_x()+e.x-root._drag[0]}+{root.winfo_y()+e.y-root._drag[1]}"),
-    save_config(root.winfo_x()+e.x-root._drag[0], root.winfo_y()+e.y-root._drag[1],
-                root.attributes("-alpha"), conf["bg"])
-))
+def update_menu():
+    menu.delete(0,"end")
+    menu.add_command(label="追従OFF（枠あり）" if conf["follow"] else "追従ON（枠なし）", command=lambda: set_follow(not conf["follow"]))
+    menu.add_separator(); menu.add_command(label="終了", command=root.quit)
+label.bind("<Button-3>", lambda e: (update_menu(), menu.post(e.x_root, e.y_root)))
 
-# 透過率設定UI（中クリック）
-def show_alpha_settings(e=None):
-    win = Toplevel(root)
-    win.title("透過率設定")
-    win.geometry(f"+{root.winfo_x()+WIDTH+10}+{root.winfo_y()}")
-    win.attributes("-topmost", True)
-    tk.Label(win, text="透明度 (0.3〜1.0)", font=("Meiryo", 10)).pack()
+def show_alpha(e=None):
+    win = Toplevel(root); win.title("透明度")
+    win.geometry(f"+{root.winfo_x()+W+10}+{root.winfo_y()}"); win.attributes("-topmost",True)
+    tk.Label(win, text="透明度").pack()
     s = Scale(win, from_=0.3, to=1.0, resolution=0.01, orient="horizontal", length=200)
-    s.set(root.attributes("-alpha"))
-    s.pack()
-    s.configure(command=lambda val: (
-        root.attributes("-alpha", float(val)),
-        save_config(root.winfo_x(), root.winfo_y(), float(val), conf["bg"])
-    ))
-label.bind("<Button-2>", show_alpha_settings)
+    s.set(root.attributes("-alpha")); s.pack()
+    s.configure(command=lambda val: root.attributes("-alpha", float(val)) or (conf.update({"alpha":float(val)}), save()))
+label.bind("<Button-2>", show_alpha)
 
-# 時間パース：h/m/s対応
-def parse_time_to_minutes(t):
-    h = m = s = 0
-    if match := re.search(r"(\d+)h", t): h = int(match.group(1))
-    if match := re.search(r"(\d+)m", t): m = int(match.group(1))
-    if match := re.search(r"(\d+)s", t): s = int(match.group(1))
-    return h * 60 + m + s / 60
+label.bind("<ButtonPress-1>", lambda e: setattr(root, "_drag", (e.x, e.y)))
+label.bind("<B1-Motion>", lambda e: not conf["follow"] and (
+    root.geometry(f"+{root.winfo_x()+e.x-root._drag[0]}+{root.winfo_y()+e.y-root._drag[1]}"),
+    conf.update({"x":root.winfo_x()+e.x-root._drag[0],"y":root.winfo_y()+e.y-root._drag[1]}), save())
+)
 
-# キルレート計算
-def calculate_efficiency(payload):
+def calc_eff(p):
     try:
-        data = json.loads(payload)
-        kills = int(data.get("kill", "0").replace(",", ""))
-        minutes = parse_time_to_minutes(data.get("time", "0m 0s"))
-        if minutes == 0:
-            return "未計測"
-        return f"{kills / minutes:.2f} 体/分"
-    except Exception as e:
-        print("計算エラー:", e)
-        return "未計測"
+        d=json.loads(p); k=int(d.get("kill","0").replace(",","")); t=d.get("time","")
+        m=sum(int(v[:-1])*{"h":60,"m":1,"s":1/60}[v[-1]] for v in re.findall(r"\d+[hms]",t))
+        return f"{k/m:.2f} 体/分" if m else "未計測"
+    except: return "未計測"
 
-# WebSocket受信
-async def handle_connection(websocket):
-    async for message in websocket:
-        result = calculate_efficiency(message)
-        label.config(text=f"キルレート: {result}")
-        print("受信:", message, "→", result)
+async def handle(ws):
+    async for msg in ws:
+        label.config(text=f"キルレート: {calc_eff(msg)}")
 
 async def websocket_server():
-    async with websockets.serve(handle_connection, "localhost", 8765):
+    async with websockets.serve(handle, "localhost", 8765):
         await asyncio.Future()
 
-def start_ws_thread():
-    def run():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(websocket_server())
-        loop.run_forever()
-    threading.Thread(target=run, daemon=True).start()
+def ws_thread(): threading.Thread(target=lambda: asyncio.run(websocket_server()), daemon=True).start()
 
-start_ws_thread()
+def follow_loop():
+    def loop():
+        while True:
+            if conf["follow"]:
+                try:
+                    w=gw.getWindowsWithTitle(conf["parent"])[0]
+                    root.geometry(f"+{w.left+w.width-W-conf['dx']}+{w.top+w.height-H-conf['dy']}")
+                except: pass
+            time.sleep(0.1)
+    threading.Thread(target=loop, daemon=True).start()
+
+def tray_thread():
+    img = Image.new('RGB',(16,16),(30,30,30)); ImageDraw.Draw(img).rectangle([2,2,13,13], fill=(255,255,255))
+    icon = pystray.Icon("KillrateHUD", icon=img, title="SS_KillrateHUD",
+        menu=pystray.Menu(
+            pystray.MenuItem("追従ON（枠なし）", lambda: set_follow(True)),
+            pystray.MenuItem("追従OFF（枠あり）", lambda: set_follow(False)),
+            pystray.MenuItem("位置を(0,0)に戻す", move_zero),
+            pystray.MenuItem("終了", lambda: (icon.stop(), root.quit()))
+        )
+    ); icon.run()
+
+ws_thread(); follow_loop(); threading.Thread(target=tray_thread, daemon=True).start()
 root.mainloop()
